@@ -26,6 +26,8 @@ export function writtenAccidentals(notes: MusicalNote[], keyId: KeyId, explicit 
 }
 const rank = (note: MusicalNote) => Number(note.key.split('/')[1]) * 7 + letters.indexOf(note.key[0]);
 export function generateChromaticMelody(keyId: KeyId, voiceId: VoiceId, allowed: number[], random = Math.random): MusicalNote[] {
+  // Chromatic notes are occasional color, not the basis of every exercise.
+  if (random() >= .3) return generateMelody(keyId, voiceId, allowed, random);
   const voice = voiceFor(voiceId), signature = keySignature(keyId);
   const pool = new Map<string, MusicalNote>();
   for (const note of voiceScale(keyId, voiceId)) for (const change of [-1, 0, 1]) {
@@ -44,21 +46,37 @@ export function generateChromaticMelody(keyId: KeyId, voiceId: VoiceId, allowed:
       return distance === 6 ? ['4zw', '5zm'].includes(written.id) : written.id === intervalFor(distance)?.short;
     } catch { return false; }
   });
-  // Start on an altered pitch, so enabling chromatic notes actually changes the exercise.
-  const starts = notes.filter(note => (note.accidental ?? 'n') !== signature[note.key[0]] && neighbors(note).length);
-  if (!starts.length) return generateMelody(keyId, voiceId, allowed, random);
-  const pick = (items: MusicalNote[]) => items[Math.min(items.length - 1, Math.floor(random() * items.length))];
-  const melody = [pick(starts)], used = new Set<number>();
-  while (melody.length < 4) {
-    const previous = melody[melody.length - 1];
-    let options = neighbors(previous);
-    const fresh = options.filter(note => !used.has(Math.abs(note.midi - previous.midi)));
-    if (fresh.length) options = fresh;
-    const noReturn = options.filter(note => note.midi !== melody[melody.length - 2]?.midi);
-    if (noReturn.length) options = noReturn;
-    const next = pick(options); used.add(Math.abs(next.midi - previous.midi)); melody.push(next);
+  const altered = (note: MusicalNote) => Number((note.accidental ?? 'n') !== signature[note.key[0]]);
+  const shuffled = (items: MusicalNote[]) => items.map(note => ({ note, order: random() })).sort((a, b) => a.order - b.order).map(item => item.note);
+  const edges = new Map(notes.map(note => [note, shuffled(neighbors(note))]));
+  const starts = shuffled(notes);
+  // Count occurrences, including repeated altered pitches. Search a complete path
+  // so a later step can never exceed the two-note budget or break an interval.
+  const preferred = random() < .8 ? 1 : 2;
+  for (const target of [preferred, preferred === 1 ? 2 : 1]) {
+    const failed = new Set<string>();
+    function extend(path: MusicalNote[], count: number): MusicalNote[] | null {
+      if (count > target || count + 4 - path.length < target) return null;
+      if (path.length === 4) return count === target ? path : null;
+      const last = path[path.length - 1];
+      const state = `${last.key}:${last.midi}:${path.length}:${count}`;
+      if (failed.has(state)) return null;
+      const used = new Set(path.slice(1).map((note, i) => Math.abs(note.midi - path[i].midi)));
+      const options = [...edges.get(last)!].sort((a, b) =>
+        (Number(used.has(Math.abs(a.midi - last.midi))) + Number(a.midi === path[path.length - 2]?.midi)) -
+        (Number(used.has(Math.abs(b.midi - last.midi))) + Number(b.midi === path[path.length - 2]?.midi)));
+      for (const next of options) {
+        const result = extend([...path, next], count + altered(next));
+        if (result) return result;
+      }
+      failed.add(state); return null;
+    }
+    for (const first of starts) {
+      const result = extend([first], altered(first));
+      if (result) return result;
+    }
   }
-  return melody;
+  return generateMelody(keyId, voiceId, allowed, random);
 }
 export function identifyWrittenInterval(notes: MusicalNote[]) {
   const number = Math.abs(rank(notes[1]) - rank(notes[0])) + 1;

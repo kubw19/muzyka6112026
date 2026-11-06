@@ -4,11 +4,11 @@ import { VOICES } from './voices';
 import { generateChromaticMelody, generateIntervalQuestion, identifyWrittenInterval, keySignature, quizChoices, writtenAccidentals } from './notation';
 
 describe('accidentals and written intervals', () => {
-  it('chromatic melodies contain altered pitches and preserve the selected written intervals in all keys and voices', () => {
+  it('occasional chromatic melodies cap altered occurrences and preserve the selected written intervals in all keys and voices', () => {
     for (const key of KEYS) for (const voice of VOICES) for (const distance of [1,2,3,4,5,6,7,8,9,10,11,12]) {
-      const notes = generateChromaticMelody(key.id, voice.id, [distance], () => .45);
+      const notes = generateChromaticMelody(key.id, voice.id, [distance], () => .1);
       const signature = keySignature(key.id);
-      expect(notes.some(note => (note.accidental ?? 'n') !== signature[note.key[0]])).toBe(true);
+      expect(notes.filter(note => (note.accidental ?? 'n') !== signature[note.key[0]]).length).toBeLessThanOrEqual(2);
       for (const [i, note] of notes.entries()) {
         expect(note.midi).toBeGreaterThanOrEqual(voice.low); expect(note.midi).toBeLessThanOrEqual(voice.high);
         if (i) {
@@ -19,6 +19,19 @@ describe('accidentals and written intervals', () => {
         }
       }
     }
+  });
+  it('usually stays diatonic and uses one or two altered occurrences only occasionally', () => {
+    let state = 941;
+    const random = () => { state = (state * 1664525 + 1013904223) >>> 0; return state / 2 ** 32; };
+    const counts = [0,0,0];
+    for (let i = 0; i < 500; i++) {
+      const notes = generateChromaticMelody('C', 'alto', [1,2,3,4,5,7], random);
+      const count = notes.filter(note => note.accidental).length;
+      expect(count).toBeLessThanOrEqual(2); counts[count]++;
+    }
+    expect(counts[0]).toBeGreaterThan(300);
+    expect(counts[1]).toBeGreaterThan(counts[2]);
+    expect(counts[2]).toBeGreaterThan(0);
   });
   it('applies key signatures in every octave and tracks accidentals within the measure', () => {
     expect(keySignature('G').f).toBe('#'); expect(keySignature('F').b).toBe('b');
