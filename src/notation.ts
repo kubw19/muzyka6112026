@@ -1,4 +1,5 @@
-import { KEYS, spellNote, voiceScale, type KeyId, type MusicalNote } from './music';
+import { generateMelody, KEYS, spellNote, voiceScale, type KeyId, type MusicalNote } from './music';
+import { intervalFor } from './intervals';
 import { voiceFor, type VoiceId } from './voices';
 
 const letters = ['c', 'd', 'e', 'f', 'g', 'a', 'b'];
@@ -24,6 +25,41 @@ export function writtenAccidentals(notes: MusicalNote[], keyId: KeyId, explicit 
   });
 }
 const rank = (note: MusicalNote) => Number(note.key.split('/')[1]) * 7 + letters.indexOf(note.key[0]);
+export function generateChromaticMelody(keyId: KeyId, voiceId: VoiceId, allowed: number[], random = Math.random): MusicalNote[] {
+  const voice = voiceFor(voiceId), signature = keySignature(keyId);
+  const pool = new Map<string, MusicalNote>();
+  for (const note of voiceScale(keyId, voiceId)) for (const change of [-1, 0, 1]) {
+    const alteration = (note.accidental === '#' ? 1 : note.accidental === 'b' ? -1 : 0) + change;
+    const midi = note.midi + change;
+    if (Math.abs(alteration) > 1 || midi < voice.low || midi > voice.high) continue;
+    const candidate = spellNote(midi, note.key[0], note.degree);
+    pool.set(`${candidate.key}:${midi}`, candidate);
+  }
+  const notes = [...pool.values()];
+  const neighbors = (note: MusicalNote) => notes.filter(next => {
+    const distance = Math.abs(next.midi - note.midi);
+    if (!allowed.includes(distance) || !distance) return false;
+    try {
+      const written = identifyWrittenInterval([note, next]);
+      return distance === 6 ? ['4zw', '5zm'].includes(written.id) : written.id === intervalFor(distance)?.short;
+    } catch { return false; }
+  });
+  // Start on an altered pitch, so enabling chromatic notes actually changes the exercise.
+  const starts = notes.filter(note => (note.accidental ?? 'n') !== signature[note.key[0]] && neighbors(note).length);
+  if (!starts.length) return generateMelody(keyId, voiceId, allowed, random);
+  const pick = (items: MusicalNote[]) => items[Math.min(items.length - 1, Math.floor(random() * items.length))];
+  const melody = [pick(starts)], used = new Set<number>();
+  while (melody.length < 4) {
+    const previous = melody[melody.length - 1];
+    let options = neighbors(previous);
+    const fresh = options.filter(note => !used.has(Math.abs(note.midi - previous.midi)));
+    if (fresh.length) options = fresh;
+    const noReturn = options.filter(note => note.midi !== melody[melody.length - 2]?.midi);
+    if (noReturn.length) options = noReturn;
+    const next = pick(options); used.add(Math.abs(next.midi - previous.midi)); melody.push(next);
+  }
+  return melody;
+}
 export function identifyWrittenInterval(notes: MusicalNote[]) {
   const number = Math.abs(rank(notes[1]) - rank(notes[0])) + 1;
   const semitones = Math.abs(notes[1].midi - notes[0].midi);

@@ -1,8 +1,8 @@
 import { KEYS, type KeyId } from './music';
 import { CLEFS, VOICES, type ClefId, type VoiceId } from './voices';
 import { DEFAULT_INTERVALS, INTERVALS } from './intervals';
-export type Settings = { keyId: KeyId; exactOctave: boolean; showNames: boolean; showIntervals: boolean; explicitAccidentals: boolean; voiceId: VoiceId; clefs: Record<VoiceId, ClefId>; intervals: number[] };
-export const defaults: Settings = { keyId: 'C', exactOctave: false, showNames: false, showIntervals: false, explicitAccidentals: false, voiceId: 'soprano', clefs: { soprano: 'treble', alto: 'treble', tenor: 'bass', bass: 'bass' }, intervals: DEFAULT_INTERVALS };
+export type Settings = { keyId: KeyId; exactOctave: boolean; showNames: boolean; autoAdvance: boolean; showIntervals: boolean; chromaticNotes: boolean; voiceId: VoiceId; clefs: Record<VoiceId, ClefId>; intervals: number[] };
+export const defaults: Settings = { keyId: 'C', autoAdvance: false, exactOctave: false, showNames: false, showIntervals: false, chromaticNotes: true, voiceId: 'soprano', clefs: { soprano: 'treble', alto: 'treble', tenor: 'bass', bass: 'bass' }, intervals: DEFAULT_INTERVALS };
 export function readSettings(): Settings {
   try {
     const value = JSON.parse(localStorage.getItem('prima-settings') ?? '{}');
@@ -15,7 +15,8 @@ export function readSettings(): Settings {
       exactOctave: intervals.includes(12) || value?.exactOctave === true,
       showNames: typeof value?.showNames === 'boolean' ? value.showNames : false,
       showIntervals: value?.showIntervals === true,
-      explicitAccidentals: value?.explicitAccidentals === true,
+      autoAdvance: value?.autoAdvance === true,
+      chromaticNotes: value?.chromaticNotes !== false,
       voiceId: VOICES.some(v => v.id === value?.voiceId) ? value.voiceId : defaults.voiceId,
       clefs, intervals,
     };

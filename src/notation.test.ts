@@ -1,9 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import { KEYS, spellNote, voiceScale } from './music';
 import { VOICES } from './voices';
-import { generateIntervalQuestion, identifyWrittenInterval, keySignature, quizChoices, writtenAccidentals } from './notation';
+import { generateChromaticMelody, generateIntervalQuestion, identifyWrittenInterval, keySignature, quizChoices, writtenAccidentals } from './notation';
 
 describe('accidentals and written intervals', () => {
+  it('chromatic melodies contain altered pitches and preserve the selected written intervals in all keys and voices', () => {
+    for (const key of KEYS) for (const voice of VOICES) for (const distance of [1,2,3,4,5,6,7,8,9,10,11,12]) {
+      const notes = generateChromaticMelody(key.id, voice.id, [distance], () => .45);
+      const signature = keySignature(key.id);
+      expect(notes.some(note => (note.accidental ?? 'n') !== signature[note.key[0]])).toBe(true);
+      for (const [i, note] of notes.entries()) {
+        expect(note.midi).toBeGreaterThanOrEqual(voice.low); expect(note.midi).toBeLessThanOrEqual(voice.high);
+        if (i) {
+          const answer = identifyWrittenInterval([notes[i-1],note]);
+          expect(answer.semitones).toBe(distance);
+          if (distance === 6) expect(['4zw','5zm']).toContain(answer.id);
+          else expect(answer.id).toBe(({1:'2m',2:'2w',3:'3m',4:'3w',5:'4cz',7:'5cz',8:'6m',9:'6w',10:'7m',11:'7w',12:'8cz'} as Record<number,string>)[distance]);
+        }
+      }
+    }
+  });
   it('applies key signatures in every octave and tracks accidentals within the measure', () => {
     expect(keySignature('G').f).toBe('#'); expect(keySignature('F').b).toBe('b');
     const notes = [spellNote(66, 'f'), spellNote(65, 'f'), spellNote(65, 'f'), spellNote(66, 'f'), spellNote(78, 'f')];

@@ -12,6 +12,8 @@ import { PracticeSettings } from './components/PracticeSettings';
 import { IntervalLibrary } from './components/IntervalLibrary';
 import { IntervalReference } from './components/IntervalReference';
 import { IntervalQuiz } from './components/IntervalQuiz';
+import { generateChromaticMelody } from './notation';
+function createMelody(settings: Settings) { return settings.chromaticNotes ? generateChromaticMelody(settings.keyId, settings.voiceId, settings.intervals) : generateMelody(settings.keyId, settings.voiceId, settings.intervals); }
 
 type Mode = 'idle' | 'requesting' | 'listening' | 'playing' | 'complete';
 const emptyReading: Reading = { cents: null, progress: 0, accepted: false };
@@ -30,9 +32,15 @@ function Icon({ type, size = 20 }: { type: 'play' | 'mic' | 'next' | 'stop' | 'n
 export default function App() {
   const [settings, setSettings] = useState(readSettings);
   const [page, setPage] = useState<'practice' | 'intervals' | 'reference' | 'quiz'>('practice');
-  const [melody, setMelody] = useState(() => generateMelody(settings.keyId, settings.voiceId, settings.intervals));
+  const [melody, setMelody] = useState(() => createMelody(settings));
   const [current, setCurrent] = useState(0);
   const [mode, setMode] = useState<Mode>('idle');
+  const [micActive, setMicActive] = useState(false);
+  const microphoneOn = useRef(false);
+  const autoTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  // A single microphone stream reads the current exercise, including after Dalej.
+  const melodyRef = useRef(melody); melodyRef.current = melody;
+  const settingsRef = useRef(settings); settingsRef.current = settings;
   const [pitch, setPitch] = useState<Pitch | null>(null);
   const [reading, setReading] = useState(emptyReading);
   const [error, setError] = useState('');
@@ -55,21 +63,38 @@ export default function App() {
     document.addEventListener('visibilitychange', onHidden);
     return () => { operation.current++; engine.current?.dispose(); document.removeEventListener('visibilitychange', onHidden); };
   }, []);
+  useEffect(() => {
+    if (mode === 'complete' && settings.autoAdvance) {
+      autoTimer.current = setTimeout(() => nextMelody(), 1200);
+    }
+    return () => clearTimeout(autoTimer.current);
+  }, [mode, settings.autoAdvance]);
+  function nextMelody() {
+    clearTimeout(autoTimer.current);
+    if (!microphoneOn.current) { reset(); return; }
+    // Keep getUserMedia running; only reset the score and note evaluator.
+    const next = createMelody(settings);
+    melodyRef.current = next; setMelody(next);
+    currentRef.current = 0; setCurrent(0); evaluator.current.reset();
+    setPitch(null); setReading(emptyReading); setError(''); setMode('listening');
+  }
   function getEngine() { return engine.current ??= new AudioEngine(); }
   function stop() {
+    clearTimeout(autoTimer.current);
+    microphoneOn.current = false; setMicActive(false);
     operation.current++;
     engine.current?.stopMic(); engine.current?.stopPlayback(); evaluator.current.reset();
     setPitch(null); setReading(emptyReading); setMode(currentRef.current === 4 ? 'complete' : 'idle');
   }
   function reset(keyId = settings.keyId, newMelody = true, nextSettings = settings) {
     stop(); setError(''); currentRef.current = 0; setCurrent(0); setMode('idle');
-    if (newMelody) setMelody(generateMelody(keyId, nextSettings.voiceId, nextSettings.intervals));
+    if (newMelody) { const next = createMelody({ ...nextSettings, keyId }); melodyRef.current = next; setMelody(next); }
   }
   function changeSettings(nextSettings: Settings) {
     reset(nextSettings.keyId, true, nextSettings);
     setSettings(nextSettings);
   }
-  function displaySettings(nextSettings: Settings) { stop(); setSettings(nextSettings); }
+  function displaySettings(nextSettings: Settings) { if (nextSettings.autoAdvance === settings.autoAdvance) stop(); setSettings(nextSettings); }
   function navigate(nextPage: 'practice' | 'intervals' | 'reference' | 'quiz') { stop(); setError(''); setPage(nextPage); }
   function practiceInterval(semitones: number) {
     changeSettings({ ...settings, intervals: [semitones], exactOctave: semitones === 12 || settings.exactOctave });
@@ -92,19 +117,19 @@ export default function App() {
       const started = await getEngine().start((detected, now) => {
         if (id !== operation.current || currentRef.current >= 4) return;
         setPitch(detected);
-        const result = evaluator.current.update(detected, melody[currentRef.current].midi, settings.exactOctave, now);
+        const result = evaluator.current.update(detected, melodyRef.current[currentRef.current].midi, settingsRef.current.exactOctave, now);
         setReading(result);
         if (result.accepted) {
           currentRef.current++;
           setCurrent(currentRef.current); setReading(emptyReading);
           if (currentRef.current === 4) {
-            engine.current?.stopMic(); setMode('complete'); setPitch(null); setCompleted(n => n + 1);
+            setMode('complete'); setPitch(null); setCompleted(n => n + 1);
           }
         }
       }, () => {
         if (id === operation.current) { stop(); setError('Mikrofon został odłączony. Podłącz go i spróbuj ponownie.'); }
       });
-      if (id === operation.current && started) setMode('listening');
+      if (id === operation.current && started) { microphoneOn.current = true; setMicActive(true); setMode('listening'); }
     } catch (cause) {
       if (id !== operation.current) return;
       getEngine().stopMic(); setMode('idle');
@@ -143,14 +168,14 @@ export default function App() {
           <section className="practice-card" aria-labelledby="exercise-title">
             <div className="card-heading"><div><span className="eyebrow">TWOJE ĆWICZENIE</span><h2 id="exercise-title">Cztery nuty. Bez pośpiechu.</h2></div><span className="pill">{voiceFor(settings.voiceId).label}</span></div>
             <div className="exercise-meta"><span>{KEYS.find(k => k.id === settings.keyId)?.label}</span><span>4/4</span><span>Ćwierćnuty</span><span>{clefFor(settings.clefs[settings.voiceId]).label}</span><span>{settings.intervals.map(i => intervalFor(i).short).join(" · ")}</span></div>
-            <Score notes={melody} keyId={settings.keyId} current={current} clefId={settings.clefs[settings.voiceId]} showIntervals={settings.showIntervals} explicitAccidentals={settings.explicitAccidentals}/>
+            <Score notes={melody} keyId={settings.keyId} current={current} clefId={settings.clefs[settings.voiceId]} showIntervals={settings.showIntervals}/>
             <div className="interval-hint-controls"><button className={`button ghost ${settings.showIntervals ? 'hints-active' : ''}`} aria-pressed={settings.showIntervals} onClick={() => setSettings(s => ({ ...s, showIntervals: !s.showIntervals }))}>{settings.showIntervals ? 'Ukryj interwały' : 'Pokaż interwały'}</button>{settings.showIntervals && <span>m — mała · w — wielka · cz — czysta · TT — tryton · ↗ w górę · ↘ w dół</span>}</div>
             <div className="note-steps" aria-label="Postęp melodii">{melody.map((note, i) => <div key={i} className={`note-step ${i < current ? 'done' : i === current ? 'now' : ''}`}><span>{i < current ? <Icon type="check" size={15}/> : i + 1}</span>{settings.showNames && <small>{note.name}</small>}</div>)}</div>
-            <div className="score-actions"><button className="button secondary" onClick={() => void playNotes(tonicTriad(settings.keyId, settings.voiceId), true)} disabled={mode === 'playing'} title="Trójdźwięk toniczny: I, III i V stopień skali"><Icon type="play"/>Posłuchaj tonacji</button><button className="button secondary" onClick={() => void play(true)} disabled={mode === 'playing'}><Icon type="note"/>Pierwszy dźwięk</button><button className="button ghost" onClick={() => void play(false)} disabled={mode === 'playing'}><Icon type="play"/>Odsłuchaj melodię</button><button className="button new-exercise" onClick={() => reset()}><Icon type="next"/>Nowa melodia</button></div>
+            <div className="score-actions"><button className="button secondary" onClick={() => void playNotes(tonicTriad(settings.keyId, settings.voiceId), true)} disabled={mode === 'playing'} title="Trójdźwięk toniczny: I, III i V stopień skali"><Icon type="play"/>Posłuchaj tonacji</button><button className="button secondary" onClick={() => void play(true)} disabled={mode === 'playing'}><Icon type="note"/>Pierwszy dźwięk</button><button className="button ghost" onClick={() => void play(false)} disabled={mode === 'playing'}><Icon type="play"/>Odsłuchaj melodię</button><button className="button new-exercise" onClick={nextMelody} aria-label="Dalej — nowa melodia"><Icon type="next"/>Dalej</button></div>
             <div className={`listening-panel ${mode === 'listening' ? 'is-listening' : ''} ${mode === 'complete' ? 'is-complete' : ''}`}>
-              <div className="listening-heading"><span className="mic-disc"><Icon type={mode === 'complete' ? 'check' : 'mic'} size={22}/></span><div><h3 aria-live="polite">{status}</h3><p>{mode === 'complete' ? 'Świetnie. Powtórz ćwiczenie lub wylosuj kolejną melodię.' : mode === 'listening' ? `Nuta ${current + 1} z 4 · przytrzymaj przez chwilę, aby ją zaliczyć.` : 'Aplikacja poczeka na każdą nutę. Tempo nie jest oceniane.'}</p></div></div>
+              <div className="listening-heading"><span className="mic-disc"><Icon type={mode === 'complete' ? 'check' : 'mic'} size={22}/></span><div><h3 aria-live="polite">{status}</h3><p>{mode === 'complete' ? (settings.autoAdvance ? 'Świetnie! Za chwilę pojawi się kolejna melodia.' : 'Świetnie! Kliknij Dalej, aby przejść do kolejnej melodii.') : mode === 'listening' ? `Nuta ${current + 1} z 4 · przytrzymaj przez chwilę, aby ją zaliczyć.` : 'Aplikacja poczeka na każdą nutę. Tempo nie jest oceniane.'}</p></div></div>
               <div className="pitch-display"><div className="pitch-value"><span>WYKRYTY DŹWIĘK</span><strong>{pitch && mode === 'listening' ? detectedName(pitch.hz) : '—'}</strong><small>{pitch && mode === 'listening' ? `${Math.round(pitch.hz)} Hz` : 'Twój głos pojawi się tutaj'}</small></div><div className="tuner"><div className="tuner-labels"><span>za nisko</span><span>w punkt</span><span>za wysoko</span></div><div className="tuner-track"><div className="tuner-zone"/><div className="tuner-center"/>{cents !== null && <div className={`tuner-needle ${inTune ? 'in-tune' : ''}`} style={{ left: `${50 + Math.max(-200, Math.min(200, cents)) * .225}%` }}/>}</div><div className="tuner-caption">{cents === null ? 'Tolerancja ±100 centów · pół tonu' : `${cents > 0 ? '+' : ''}${Math.round(cents)} centów od nuty`}</div><div className="hold-track" role="progressbar" aria-label="Utrzymanie poprawnej nuty" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(reading.progress * 100)}><div style={{ width: `${reading.progress * 100}%` }}/></div></div></div>
-              <div className="mic-actions">{mode === 'listening' || mode === 'requesting' || mode === 'playing' ? <button className="button primary" onClick={stop}><Icon type="stop"/>{mode === 'playing' ? 'Zatrzymaj odsłuch' : 'Zatrzymaj mikrofon'}</button> : <button className="button primary" onClick={() => void listen()}><Icon type="mic"/>{mode === 'complete' ? 'Zaśpiewaj jeszcze raz' : current > 0 ? 'Kontynuuj śpiewanie' : 'Zacznij śpiewać'}</button>}<span>{mode === 'listening' ? '● Mikrofon aktywny' : 'Mikrofon włącza się tylko na Twoje żądanie'}</span></div>
+              <div className="mic-actions">{micActive || mode === 'requesting' || mode === 'playing' ? <button className="button primary" onClick={stop}><Icon type="stop"/>{mode === 'playing' ? 'Zatrzymaj odsłuch' : 'Zatrzymaj mikrofon'}</button> : <button className="button primary" onClick={() => void listen()}><Icon type="mic"/>{mode === 'complete' ? 'Zaśpiewaj jeszcze raz' : current > 0 ? 'Kontynuuj śpiewanie' : 'Zacznij śpiewać'}</button>}<span>{micActive ? '● Mikrofon aktywny' : 'Mikrofon włącza się tylko na Twoje żądanie'}</span></div>
             </div>
             {error && <div className="error" role="alert">{error}</div>}
           </section>

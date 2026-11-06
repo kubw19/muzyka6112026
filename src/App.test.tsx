@@ -21,20 +21,62 @@ beforeEach(() => {
   audio.start.mockImplementation(async (onPitch) => { audio.onPitch = onPitch; return true; });
   audio.play.mockResolvedValue(undefined);
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 const start = async () => { await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Zacznij śpiewać' })); }); };
 const sing = (midi: number, startTime: number) => {
   for (let now = startTime; now <= startTime + 300; now += 50) act(() => audio.onPitch?.({ hz: frequency(midi), confidence: .99, rms: .2 }, now));
 };
 describe('singing module integration', () => {
-  it('shows explicit accidentals without changing the singing melody', () => {
-    render(<App/>);
-    const before = screen.getByTestId('score').getAttribute('data-notes');
-    fireEvent.click(screen.getByRole('checkbox', { name: /Znaki przy każdej nucie/ }));
-    expect(screen.getByTestId('score').getAttribute('data-accidentals')).toBe('true');
-    expect(screen.getByTestId('score').getAttribute('data-notes')).toBe(before);
-    expect(JSON.parse(localStorage.getItem('prima-settings')!).explicitAccidentals).toBe(true);
+  it('Dalej keeps the same stream and evaluates the new melody instead of the captured old notes', async () => {
+    render(<App/>); await start();
+    const stops = audio.stopMic.mock.calls.length;
+    const callback = audio.onPitch;
+    sing(JSON.parse(screen.getByTestId('score').getAttribute('data-notes')!)[0], 0);
+    fireEvent.click(screen.getByRole('button', { name: 'Dalej — nowa melodia' }));
+    expect(audio.stopMic.mock.calls.length).toBe(stops);
+    expect(audio.start).toHaveBeenCalledTimes(1); expect(audio.onPitch).toBe(callback);
+    expect(screen.getByTestId('score').getAttribute('data-current')).toBe('0');
+    const notes: number[] = JSON.parse(screen.getByTestId('score').getAttribute('data-notes')!);
+    notes.forEach((note, i) => sing(note, 1000 + i * 500));
+    expect(screen.getByTestId('score').getAttribute('data-current')).toBe('4');
+    expect(screen.getByRole('button', { name: 'Zatrzymaj mikrofon' })).toBeTruthy();
+    expect(audio.stopMic.mock.calls.length).toBe(stops);
+    fireEvent.click(screen.getByRole('button', { name: 'Dalej — nowa melodia' }));
+    expect(screen.getByTestId('score').getAttribute('data-current')).toBe('0');
+    expect(audio.start).toHaveBeenCalledTimes(1);
   });
+  it('automatically advances only when enabled, after the completion pause', async () => {
+    vi.useFakeTimers(); render(<App/>); await start();
+    const stops = audio.stopMic.mock.calls.length;
+    fireEvent.click(screen.getByRole('checkbox', { name: /Automatycznie dalej/ }));
+    expect(audio.stopMic.mock.calls.length).toBe(stops);
+    const notes: number[] = JSON.parse(screen.getByTestId('score').getAttribute('data-notes')!);
+    notes.forEach((note, i) => sing(note, i * 500));
+    expect(screen.getByTestId('score').getAttribute('data-current')).toBe('4');
+    await act(async () => vi.advanceTimersByTime(1199));
+    expect(screen.getByTestId('score').getAttribute('data-current')).toBe('4');
+    await act(async () => vi.advanceTimersByTime(1));
+    expect(screen.getByTestId('score').getAttribute('data-current')).toBe('0');
+    expect(audio.start).toHaveBeenCalledTimes(1); expect(audio.stopMic.mock.calls.length).toBe(stops);
+    expect(JSON.parse(localStorage.getItem('prima-settings')!).autoAdvance).toBe(true);
+  });
+  it('manual next and stopping the microphone cancel pending automatic navigation', async () => {
+    vi.useFakeTimers(); render(<App/>); await start();
+    fireEvent.click(screen.getByRole('checkbox', { name: /Automatycznie dalej/ }));
+    const notes: number[] = JSON.parse(screen.getByTestId('score').getAttribute('data-notes')!);
+    notes.forEach((note, i) => sing(note, i * 500));
+    fireEvent.click(screen.getByRole('button', { name: 'Dalej — nowa melodia' }));
+    const next = screen.getByTestId('score').getAttribute('data-notes');
+    await act(async () => vi.advanceTimersByTime(1500));
+    expect(screen.getByTestId('score').getAttribute('data-notes')).toBe(next);
+    const current: number[] = JSON.parse(next!);
+    current.forEach((note, i) => sing(note, 3000 + i * 500));
+    fireEvent.click(screen.getByRole('button', { name: 'Zatrzymaj mikrofon' }));
+    await act(async () => vi.advanceTimersByTime(1500));
+    expect(screen.getByTestId('score').getAttribute('data-current')).toBe('4');
+    expect(screen.getByTestId('score').getAttribute('data-notes')).toBe(next);
+  });
+
   it('opens notation quiz, locks the first answer and allows another question', () => {
     render(<App/>);
     fireEvent.click(screen.getByRole('button', { name: /Rozpoznaj interwał/ }));
@@ -69,15 +111,15 @@ describe('singing module integration', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Ukryj interwały' }));
     expect(screen.getByTestId('score').getAttribute('data-intervals')).toBe('false');
   });
-  it('completes all four notes without a tempo requirement and releases the microphone', async () => {
+  it('completes all four notes without a tempo requirement and keeps the microphone ready for the next melody', async () => {
     render(<App/>);
     const notes: number[] = JSON.parse(screen.getByTestId('score').getAttribute('data-notes')!);
     await start();
     notes.forEach((midi, i) => sing(midi - 12, 1000 + i * 1500));
     expect(screen.getByTestId('score').getAttribute('data-current')).toBe('4');
     expect(screen.getByRole('heading', { name: 'Cała melodia zaśpiewana!' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Zaśpiewaj jeszcze raz' })).toBeTruthy();
-    expect(audio.stopMic).toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Zatrzymaj mikrofon' })).toBeTruthy();
+    expect(audio.stopMic).not.toHaveBeenCalled();
   });
   it('does not accept a different octave in exact mode', async () => {
     render(<App/>);

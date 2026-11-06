@@ -50,7 +50,7 @@ Testy automatyczne sprawdzają wysokości syntetyczne, harmoniczne, ciszę, szum
 
 ## Stan weryfikacji
 
-Przeszło 191 testów automatycznych oraz build produkcyjny. W przeglądarce sprawdzono zapis nutowy, zmianę tonacji, podpowiedzi, zapis ustawień, stan odsłuchu, aktualizację service workera i odświeżenie z losowaniem melodii przy zatrzymanym serwerze. Rzeczywisty głos i mikrofon użytkownika pozostają do sprawdzenia.
+Przeszło 194 testy automatycznych oraz build produkcyjny. W przeglądarce sprawdzono zapis nutowy, zmianę tonacji, podpowiedzi, zapis ustawień, stan odsłuchu, aktualizację service workera i odświeżenie z losowaniem melodii przy zatrzymanym serwerze. Rzeczywisty głos i mikrofon użytkownika pozostają do sprawdzenia.
 
 `npm audit --omit=dev`: 0 podatności. Pełny audyt zgłasza 5 problemów w narzędziach budowania offline (2 niskie, 3 umiarkowane; zależności Workbox, glob, minimatch i deepmerge). `npm audit fix` nie usuwa ich w obecnym zestawie wersji. Te pakiety nie są dołączane jako kod aplikacji do przeglądarki. Narzędzie testowe zaktualizowano do wersji 4.1.12.
 
@@ -88,3 +88,10 @@ Pozycja „Ściągawka” w menu zawiera interwały od prymy do oktawy: liczbę 
 Moduł „Rozpoznaj interwał” losuje parę nut w wybranej tonacji, zakresie głosu i kluczu. Można włączyć znaki przygodne: krzyżyki, bemole i kasowniki. Numer interwału wynika z pisowni literowej, a jakość z liczby półtonów, więc kwarta zwiększona i kwinta zmniejszona są odrębnymi odpowiedziami mimo identycznego brzmienia. Każde pytanie ma sześć odpowiedzi; pierwsza próba jest liczona do wyniku. Po niej pojawia się wyjaśnienie. Zakres ćwiczeń: sekunda–oktawa, 1–12 półtonów, bez podwójnych znaków.
 
 Zapis nutowy uwzględnia znaki przy kluczu we wszystkich oktawach oraz zmiany przygodne w obrębie taktu. Kasownik przywraca naturalną wysokość. W module śpiewania opcja „Znaki przy każdej nucie” dodaje jawny znak także przy dźwiękach wynikających już z tonacji (w tym kasownik przy dźwięku naturalnym jako podpowiedź). Nie zmienia melodii ani odtwarzanych wysokości i jest zapamiętywana lokalnie. Melodie śpiewane pozostają diatoniczne w wybranej tonacji.
+
+
+## Ciągła praktyka i dźwięki chromatyczne
+
+Przycisk „Dalej” ma większy obszar dotyku na telefonie i zachowuje aktywny mikrofon, również po ukończeniu melodii. Mikrofon można zatrzymać jego przyciskiem; nadal wyłącza się przy odsłuchu, zmianie modułu i ukryciu karty. Opcja „Automatycznie dalej” jest domyślnie wyłączona. Po włączeniu nowa melodia pojawia się 1,2 s po ukończeniu; ręczne Dalej, zatrzymanie mikrofonu lub zmiana modułu anulują oczekujące przejście.
+
+Opcję „Znaki przy każdej nucie” zastąpiły „Dźwięki chromatyczne” (domyślnie włączone). Generator dodaje rzeczywiste dźwięki spoza tonacji z poprawnymi krzyżykami, bemolami i kasownikami, nie znaki przypominające przy każdej nucie. Zachowuje zakres głosu i zaznaczone interwały również pod względem pisowni. Wyłączenie tej opcji przywraca melodie diatoniczne. Oba ustawienia są zapisywane lokalnie.
